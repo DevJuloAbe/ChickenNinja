@@ -88,10 +88,18 @@ import GameCanvas from "./components/GameCanvas.vue";
 const GAMES_ENDPOINT = "https://docking-635955947416.asia-east1.run.app/api/games/";
 const VERIFY_PHONE_ENDPOINT = "https://docking-635955947416.asia-east1.run.app/api/auth/game-login";
 const LEADERBOARD_ENDPOINT = "https://docking-635955947416.asia-east1.run.app/api/usermobile/masked/topscorer";
-const CURRENT_GAME_SLUG = "tek-hen";
-const GAME_SECRET_KEY = "";
+const GAME_SECRET_KEY = "9ae58c2c2e2a24fb49dba86f27a6ec4a";
 
 const games = ref([]);
+
+function getGameSecretKey() {
+  return currentGame.value?.game_secret_key
+    || currentGame.value?.secret_key
+    || currentGame.value?.gamesecretkey
+    || currentGame.value?.gameSecretKey
+    || currentGame.value?.secretKey
+    || GAME_SECRET_KEY;
+}
 const currentGame = ref(null);
 const leaderboard = ref([]);
 const score = ref(0);
@@ -165,26 +173,36 @@ function validatePhone() {
 async function submitPhone() {
   if (!validatePhone() || !currentGame.value) return;
 
+  if (!currentGame.value.game_id) {
+    phoneError.value = "Verification failed: game_id is missing.";
+    return;
+  }
+
   isSubmitting.value = true;
   phoneError.value = "";
 
-  try {
-    const payload = {
-      game_id: currentGame.value.game_id,
-      nickname: nickname.value,
-      gamesecretKey: GAME_SECRET_KEY,
-      phone: phone.value,
-      game_icon_path: currentGame.value.image_url,
-      points: String(score.value),
-      is_verified: 1,
-    };
+  const payload = {
+    game_id: currentGame.value.game_id,
+    nickname: nickname.value,
+    game_secret_key: getGameSecretKey(),
+    phone: phone.value,
+    game_icon_path: currentGame.value.image_url,
+    points: String(score.value),
+    is_verified: 1,
+  };
 
+  try {
     const response = await fetch(VERIFY_PHONE_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
     const data = await response.json().catch(() => ({}));
+
+    if (response.status === 404) {
+      phoneError.value = "Verification endpoint not found (404).";
+      return;
+    }
 
     if (!response.ok || data?.success === false) {
       phoneError.value = data?.message || "This number could not be verified.";
@@ -196,7 +214,8 @@ async function submitPhone() {
     if (key) localStorage.setItem(`${key}:nickname`, nickname.value);
     isVerified.value = true;
     showVerifyModal.value = false;
-  } catch {
+  } catch (error) {
+    console.error("Verification request failed", error);
     phoneError.value = "Verification failed. Please try again.";
   } finally {
     isSubmitting.value = false;

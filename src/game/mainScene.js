@@ -489,6 +489,16 @@ export default class MainScene extends Phaser.Scene {
     return { velocityY, gravityY };
   }
 
+  getResponsiveScale(baseScale, minScale = 0.18, maxScale = 0.55) {
+    const size = Math.min(this.scale.width, this.scale.height);
+    const factor = Phaser.Math.Clamp(size / 1000, 0.65, 1.0);
+    return Phaser.Math.Clamp(baseScale * factor, minScale, maxScale);
+  }
+
+  isMobileLayout() {
+    return this.scale.width <= 760 || this.scale.height <= 660;
+  }
+
   /**
    * Instantiates a new object from the object pool.
    */
@@ -515,8 +525,8 @@ export default class MainScene extends Phaser.Scene {
       object.setBlendMode(Phaser.BlendModes.NORMAL);
       object.setData("noLifePenalty", false);
       object.setData("rainChicken", false);
-      object.setScale(0.3);
-      object.setCircle(Math.max(object.width, object.height) / 2);
+      object.setScale(this.getResponsiveScale(0.32, 0.22, 0.42));
+      object.setCircle(Math.max(object.displayWidth, object.displayHeight) / 2);
       object.setVelocity(
         Phaser.Math.Between(-width * 0.22 * speed, width * 0.22 * speed),
         arc.velocityY
@@ -559,11 +569,11 @@ export default class MainScene extends Phaser.Scene {
       const arc = this.getRandomLaunchArc(startY, "bonus");
 
       powerUp.setActive(true).setVisible(true);
-      powerUp.setScale(0.42);
+      powerUp.setScale(this.getResponsiveScale(0.44, 0.32, 0.52));
       powerUp.clearTint();
       powerUp.setAlpha(1);
       powerUp.setBlendMode(Phaser.BlendModes.NORMAL);
-      powerUp.setCircle(Math.max(powerUp.width, powerUp.height) / 2);
+      powerUp.setCircle(Math.max(powerUp.displayWidth, powerUp.displayHeight) / 2);
       powerUp.setVelocity(
         direction * Phaser.Math.Between(width * 0.09 * speed, width * 0.24 * speed),
         arc.velocityY
@@ -615,8 +625,8 @@ export default class MainScene extends Phaser.Scene {
     chicken.clearTint();
     chicken.setAlpha(1);
     chicken.setBlendMode(Phaser.BlendModes.NORMAL);
-    chicken.setScale(0.24);
-    chicken.setCircle(Math.max(chicken.width, chicken.height) / 2);
+    chicken.setScale(this.getResponsiveScale(0.26, 0.18, 0.34));
+    chicken.setCircle(Math.max(chicken.displayWidth, chicken.displayHeight) / 2);
     chicken.setData("noLifePenalty", true);
     chicken.setData("rainChicken", true);
     chicken.setVelocity(
@@ -639,9 +649,9 @@ export default class MainScene extends Phaser.Scene {
       const width = this.scale.width;
       const height = this.scale.height;
       const speed = this.getLevelSettings().speed;
-      shuriken.setScale(1.15);
+      shuriken.setScale(this.getResponsiveScale(1.12, 0.88, 1.4));
       shuriken.setRotation(Math.random() * Math.PI * 2);
-      shuriken.setCircle(58);
+      shuriken.setCircle(Math.max(shuriken.displayWidth, shuriken.displayHeight) / 2);
       
       // Throw shuriken upward-left or upward-right with speed.
       const direction = Math.random() < 0.5 ? -1 : 1;
@@ -670,8 +680,8 @@ export default class MainScene extends Phaser.Scene {
       const direction = Math.random() < 0.5 ? -1 : 1;
 
       beer.setActive(true).setVisible(true);
-      beer.setScale(0.075);
-      beer.setCircle(38);
+      beer.setScale(this.getResponsiveScale(0.078, 0.048, 0.095));
+      beer.setCircle(Math.max(beer.displayWidth, beer.displayHeight) / 2);
       beer.setRotation(Phaser.Math.FloatBetween(-0.3, 0.3));
       beer.setVelocity(
         direction * Phaser.Math.Between(width * 0.08 * speed, width * 0.22 * speed),
@@ -697,8 +707,8 @@ export default class MainScene extends Phaser.Scene {
       const direction = Math.random() < 0.5 ? -1 : 1;
 
       bomb.setActive(true).setVisible(true);
-      bomb.setScale(0.95);
-      bomb.setCircle(42);
+      bomb.setScale(this.getResponsiveScale(0.96, 0.78, 1.05));
+      bomb.setCircle(Math.max(bomb.displayWidth, bomb.displayHeight) / 2);
       bomb.setRotation(Phaser.Math.FloatBetween(-0.4, 0.4));
       bomb.setVelocity(
         direction * Phaser.Math.Between(width * 0.1 * speed, width * 0.24 * speed),
@@ -739,7 +749,7 @@ export default class MainScene extends Phaser.Scene {
     const landing = this.getRandomTrayPoint();
 
     collected.setDepth(95);
-    collected.setScale(0.08);
+    collected.setScale(this.getResponsiveScale(0.08, 0.05, 0.1));
     collected.setRotation(Phaser.Math.FloatBetween(-0.5, 0.5));
     collected.body.stop();
     collected.body.enable = false;
@@ -848,20 +858,27 @@ export default class MainScene extends Phaser.Scene {
     }));
 
     const level = this.getLevelSettings();
+    const mobile = this.isMobileLayout();
+    const fontSize = mobile ? "18px" : "24px";
+    const x = mobile ? 32 : this.scale.width - 32;
+    const y = mobile ? 96 : 28;
+    const origin = mobile ? 0 : 1;
+    const align = mobile ? "left" : "right";
+
     this.scoreText = this.add.text(
-      this.scale.width - 32,
-      28,
+      x,
+      y,
       `LEVEL ${this.currentLevel} ${level.name}\nPOINTS ${this.score}${level.maxScore ? ` / ${level.maxScore}` : ""}`,
       {
       fontFamily: "system-ui, Segoe UI, sans-serif",
-      fontSize: "24px",
+      fontSize,
       fontStyle: "900",
       color: "#fff3c4",
       stroke: "#111111",
       strokeThickness: 5,
-      align: "right"
+      align
       }
-    ).setOrigin(1, 0).setDepth(110);
+    ).setOrigin(origin, 0).setDepth(110);
   }
 
   addPoints(amount, x, y) {
@@ -981,9 +998,10 @@ export default class MainScene extends Phaser.Scene {
   }
 
   showPowerUpText(message, x, y) {
+    const textSize = this.isMobileLayout() ? "26px" : "34px";
     const text = this.add.text(x, y - 44, message, {
       fontFamily: "system-ui, Segoe UI, sans-serif",
-      fontSize: "34px",
+      fontSize: textSize,
       fontStyle: "900",
       color: "#fff0a8",
       stroke: "#2b1700",
@@ -1149,13 +1167,14 @@ export default class MainScene extends Phaser.Scene {
     });
 
     this.physics.pause();
+    const gameOverSize = this.isMobileLayout() ? "42px" : "60px";
     this.add.text(
       this.cameras.main.width / 2,
       this.cameras.main.height / 2,
       `GAME OVER\nPOINTS ${this.score}`,
       {
         fontFamily: "system-ui, Segoe UI, sans-serif",
-        fontSize: "60px",
+        fontSize: gameOverSize,
         fill: "#ff3333",
         fontStyle: "bold",
         align: "center",
