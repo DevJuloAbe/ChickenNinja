@@ -31,8 +31,8 @@ export default class MainScene extends Phaser.Scene {
       1: { name: "SLOW", maxScore: 300, bombChance: 0.08, speed: 0.72, spawnDelay: 1300 },
       2: { name: "MODERATE FAST", maxScore: 500, bombChance: 0.18, speed: 0.95, spawnDelay: 1050 },
       3: { name: "FAST", maxScore: 1000, bombChance: 0.3, speed: 1.18, spawnDelay: 820 },
-      4: { name: "SUPERFAST", maxScore: 2000, bombChance: 0.4, speed: 1.38, spawnDelay: 820 },
-      5: { name: "SWORD STORM", maxScore: null, bombChance: 0.48, swordChance: 0.34, speed: 1.56, spawnDelay: 700 },
+      4: { name: "SUPERFAST", maxScore:1500, bombChance: 0.35, speed: 1.38, spawnDelay: 820 },
+      5: { name: "HARDCORE", maxScore: null, bombChance: 0.5, speed: 1.38, spawnDelay: 720 },
     };
     this.scoreText = null;
     this.collectedDrumsticks = [];
@@ -55,7 +55,6 @@ export default class MainScene extends Phaser.Scene {
 
     this.createParticleTexture();
     this.createShurikenTexture();
-    this.createSwordTexture();
     this.createBeerTexture();
     this.createSisigTexture();
     this.createBombTexture();
@@ -72,9 +71,6 @@ export default class MainScene extends Phaser.Scene {
 
     // Group to manage thrown shuriken
     this.shuriken = this.physics.add.group();
-
-    // Group to manage level 5 sword attacks
-    this.swords = this.physics.add.group();
 
     // Group to manage bonus beer throws
     this.beers = this.physics.add.group();
@@ -248,17 +244,6 @@ export default class MainScene extends Phaser.Scene {
       }
     });
 
-    // Check collision with level 5 sword attacks
-    this.swords.children.iterate((sword) => {
-      if (!sword || !sword.active) return;
-
-      const bounds = sword.getBounds();
-
-      if (Phaser.Geom.Intersects.LineToRectangle(line, bounds)) {
-        this.sliceSword(sword);
-      }
-    });
-
     // Check collision with bonus beers
     this.beers.children.iterate((beer) => {
       if (!beer || !beer.active) return;
@@ -388,33 +373,6 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Handles sword attack slicing effect.
-   */
-  sliceSword(sword) {
-    if (this.isGameOver || this.isLevelTransitioning) return;
-
-    this.cameras.main.shake(130, 0.006);
-    this.tweens.killTweensOf(sword);
-
-    const metalEmitter = this.add.particles(sword.x, sword.y, "particle", {
-      speed: { min: 160, max: 360 },
-      angle: { min: 0, max: 360 },
-      scale: { start: 0.1, end: 0 },
-      color: [0xf8f8f0, 0x9fb2c4, 0xffdf76],
-      alpha: { start: 0.9, end: 0 },
-      lifespan: 650,
-      gravityY: 420,
-      quantity: 22,
-      emitting: false
-    });
-    metalEmitter.explode();
-
-    this.drawBladeDeflectEffect(sword.x, sword.y);
-    sword.setActive(false).setVisible(false);
-    sword.body.stop();
-  }
-
-  /**
    * Breaks a beer bottle and awards a random bonus.
    */
   sliceBeer(beer) {
@@ -468,7 +426,7 @@ export default class MainScene extends Phaser.Scene {
 
     this.addPoints(bonus, sisig.x, sisig.y);
     this.showPowerUpText("SISIG!", sisig.x, sisig.y);
-    this.addCollectedSisig(sisig.x, sisig.y);
+    this.addCollectedItem("sisig", sisig.x, sisig.y, 0.32, 0.22, 0.4);
     sisig.setActive(false).setVisible(false);
     sisig.body.stop();
   }
@@ -505,7 +463,6 @@ export default class MainScene extends Phaser.Scene {
       onComplete: () => flash.destroy()
     });
 
-    this.showBombScreenEffect(bomb.x, bomb.y);
     this.currentHealth = Math.max(0, this.currentHealth - 1);
     this.drawHearts();
     this.showPowerUpText("-1 LIFE", bomb.x, bomb.y);
@@ -627,10 +584,6 @@ export default class MainScene extends Phaser.Scene {
       // 30% chance to throw a shuriken attack
       if (Math.random() < 0.3) {
         this.throwShuriken(x, height + 20);
-      }
-
-      if (this.getLevelSettings().swordChance && Math.random() < this.getLevelSettings().swordChance) {
-        this.throwSword(Phaser.Math.Between(width * 0.12, width * 0.88), height + 30);
       }
 
       // Bonus beer throws can be sliced for random points.
@@ -777,56 +730,6 @@ export default class MainScene extends Phaser.Scene {
         duration,
         ease: "Quad.In",
         onComplete: () => this.handleShurikenScreenHit(shuriken)
-      });
-    }
-  }
-
-  /**
-   * Throws a sword attack toward the screen on level 5.
-   */
-  throwSword(fromX, fromY) {
-    if (this.isGameOver) return;
-
-    const sword = this.swords.create(fromX, fromY, "sword");
-
-    if (sword) {
-      const width = this.scale.width;
-      const height = this.scale.height;
-      const speed = this.getLevelSettings().speed;
-      const targetX = Phaser.Math.Between(width * 0.18, width * 0.82);
-      const targetY = Phaser.Math.Between(height * 0.2, height * 0.62);
-      const startScale = this.getResponsiveScale(0.42, 0.3, 0.56);
-      const impactScale = this.getResponsiveScale(1.3, 0.96, 1.72);
-      const angleToTarget = Phaser.Math.Angle.Between(fromX, fromY, targetX, targetY);
-      const duration = Phaser.Math.Clamp(1260 / speed, 760, 1320);
-
-      sword.setActive(true).setVisible(true);
-      sword.clearTint();
-      sword.setAlpha(0.96);
-      sword.setDepth(126);
-      sword.setPosition(
-        Phaser.Math.Clamp(fromX, width * 0.1, width * 0.9),
-        fromY
-      );
-      sword.setScale(startScale);
-      sword.setRotation(angleToTarget);
-      sword.setSize(210, 62, true);
-      sword.setVelocity(0, 0);
-      sword.setAngularVelocity(0);
-      sword.setGravityY(0);
-      sword.body.setAllowGravity(false);
-
-      this.tweens.add({
-        targets: sword,
-        x: targetX,
-        y: targetY,
-        scaleX: impactScale,
-        scaleY: impactScale,
-        angle: Phaser.Math.RadToDeg(angleToTarget) + Phaser.Math.Between(-14, 14),
-        alpha: 1,
-        duration,
-        ease: "Quad.In",
-        onComplete: () => this.handleSwordScreenHit(sword)
       });
     }
   }
@@ -997,67 +900,6 @@ export default class MainScene extends Phaser.Scene {
   }
 
   /**
-   * Adds a more polished sisig plate to the collection tray.
-   */
-  addCollectedSisig(fromX, fromY) {
-    const collected = this.add.container(fromX, fromY);
-    const landing = this.getRandomTrayPoint(62, 34, 50);
-    const plate = this.add.image(0, -2, "sisig");
-    const plateScale = this.getResponsiveScale(0.42, 0.32, 0.5);
-    const shadow = this.add.graphics();
-    const glow = this.add.graphics();
-    const steam = this.add.graphics();
-    const garnish = this.add.graphics();
-
-    plate.setScale(plateScale);
-    plate.setRotation(Phaser.Math.FloatBetween(-0.12, 0.12));
-
-    shadow.fillStyle(0x000000, 0.36);
-    shadow.fillEllipse(0, 17, plate.displayWidth * 1.05, plate.displayHeight * 0.36);
-
-    glow.fillStyle(0xf2b84b, 0.16);
-    glow.fillEllipse(0, 2, plate.displayWidth * 1.16, plate.displayHeight * 0.82);
-    glow.lineStyle(2, 0xffdf8d, 0.55);
-    glow.strokeEllipse(0, 1, plate.displayWidth * 1.04, plate.displayHeight * 0.68);
-
-    steam.lineStyle(2, 0xf8f0d7, 0.42);
-    [-16, 0, 16].forEach((xOffset, index) => {
-      const top = -36 - index * 3;
-
-      steam.beginPath();
-      steam.moveTo(xOffset, -18);
-      steam.lineTo(xOffset + 6, -25);
-      steam.lineTo(xOffset - 3, top);
-      steam.strokePath();
-    });
-
-    garnish.fillStyle(0x78c85a, 0.86);
-    garnish.fillCircle(-21, -8, 3);
-    garnish.fillCircle(22, -10, 3);
-    garnish.fillStyle(0xffe078, 0.9);
-    garnish.fillCircle(4, -13, 3);
-
-    collected.setDepth(98);
-    collected.add([shadow, glow, plate, garnish, steam]);
-    collected.setData("trayPadding", { horizontal: 62, top: 34, bottom: 50 });
-
-    this.collectedDrumsticks.push(collected);
-
-    this.tweens.add({
-      targets: collected,
-      x: landing.x,
-      y: landing.y,
-      duration: Phaser.Math.Between(560, 780),
-      ease: "Back.Out",
-      onComplete: () => {
-        if (!collected.active) return;
-
-        collected.setPosition(landing.x, landing.y);
-      }
-    });
-  }
-
-  /**
    * Repositions collected drumsticks so they stay visible at the bottom.
    */
   layoutCollectedDrumsticks() {
@@ -1067,34 +909,19 @@ export default class MainScene extends Phaser.Scene {
     this.collectedDrumsticks.forEach((drumstick) => {
       if (drumstick.body?.enable) return;
 
-      const padding = drumstick.getData?.("trayPadding") || {};
-      const point = this.getRandomTrayPoint(
-        padding.horizontal,
-        padding.top,
-        padding.bottom
-      );
+      const point = this.getRandomTrayPoint();
       drumstick.setPosition(point.x, point.y);
     });
   }
 
-  getRandomTrayPoint(horizontalPadding = 42, topPadding = 12, bottomPadding = 34) {
+  getRandomTrayPoint() {
     const width = this.scale.width;
     const height = this.scale.height;
     const trayHeight = Math.min(100, Math.max(72, height * 0.13));
-    const xPadding = Math.min(horizontalPadding, width / 2);
-    let minY = height - trayHeight + topPadding;
-    let maxY = height - bottomPadding;
-
-    if (minY > maxY) {
-      const centerY = height - trayHeight / 2;
-
-      minY = centerY - 4;
-      maxY = centerY + 4;
-    }
 
     return {
-      x: Phaser.Math.Between(xPadding, Math.max(xPadding, width - xPadding)),
-      y: Phaser.Math.Between(minY, maxY),
+      x: Phaser.Math.Between(42, Math.max(42, width - 42)),
+      y: Phaser.Math.Between(height - trayHeight + 12, height - 34),
     };
   }
 
@@ -1260,7 +1087,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   stopActiveThrowables() {
-    const groups = [this.objects, this.powerUps, this.shuriken, this.swords, this.beers, this.sisigs, this.bombs];
+    const groups = [this.objects, this.powerUps, this.shuriken, this.beers, this.sisigs, this.bombs];
 
     groups.forEach((group) => {
       group.children.iterate((item) => {
@@ -1376,97 +1203,15 @@ export default class MainScene extends Phaser.Scene {
     });
   }
 
-  showBombScreenEffect(hitX, hitY) {
-    const width = this.scale.width;
-    const height = this.scale.height;
-    const x = Phaser.Math.Clamp(hitX, width * 0.08, width * 0.92);
-    const y = Phaser.Math.Clamp(hitY, height * 0.12, height * 0.78);
-    const blast = this.add.graphics();
-    const maxRadius = Math.min(width, height) * 0.34;
-
-    blast.setDepth(194);
-    blast.fillStyle(0xffb22c, 0.28);
-    blast.fillRect(0, 0, width, height);
-
-    blast.fillStyle(0xfff0a3, 0.45);
-    blast.fillCircle(x, y, maxRadius * 0.5);
-    blast.lineStyle(10, 0xffe66d, 0.72);
-    blast.strokeCircle(x, y, maxRadius * 0.72);
-    blast.lineStyle(5, 0xff5a1f, 0.82);
-    blast.strokeCircle(x, y, maxRadius);
-
-    for (let i = 0; i < 24; i++) {
-      const angle = (Math.PI * 2 * i) / 24 + Phaser.Math.FloatBetween(-0.08, 0.08);
-      const inner = maxRadius * Phaser.Math.FloatBetween(0.24, 0.42);
-      const outer = maxRadius * Phaser.Math.FloatBetween(0.72, 1.16);
-
-      blast.lineStyle(Phaser.Math.Between(3, 8), Phaser.Utils.Array.GetRandom([0xfff1a1, 0xff9b21, 0xd91c1c]), 0.82);
-      blast.beginPath();
-      blast.moveTo(x + Math.cos(angle) * inner, y + Math.sin(angle) * inner);
-      blast.lineTo(x + Math.cos(angle) * outer, y + Math.sin(angle) * outer);
-      blast.strokePath();
-    }
-
-    for (let i = 0; i < 16; i++) {
-      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
-      const distance = Phaser.Math.Between(maxRadius * 0.18, maxRadius * 0.88);
-      const smokeX = x + Math.cos(angle) * distance;
-      const smokeY = y + Math.sin(angle) * distance;
-
-      blast.fillStyle(Phaser.Utils.Array.GetRandom([0x111111, 0x3a332e, 0x5b5046]), 0.34);
-      blast.fillCircle(smokeX, smokeY, Phaser.Math.Between(16, 42));
-    }
-
-    this.tweens.add({
-      targets: blast,
-      alpha: 0,
-      duration: 760,
-      ease: "Quad.Out",
-      onComplete: () => blast.destroy()
-    });
-  }
-
-  drawBladeDeflectEffect(x, y) {
-    const flash = this.add.graphics();
-    const length = this.isMobileLayout() ? 86 : 128;
-
-    flash.setDepth(165);
-    flash.lineStyle(5, 0xf8fbff, 0.95);
-    flash.beginPath();
-    flash.moveTo(x - length / 2, y - length / 3);
-    flash.lineTo(x + length / 2, y + length / 3);
-    flash.strokePath();
-    flash.lineStyle(3, 0xffdf76, 0.88);
-    flash.beginPath();
-    flash.moveTo(x - length / 2, y + length / 3);
-    flash.lineTo(x + length / 2, y - length / 3);
-    flash.strokePath();
-
-    this.tweens.add({
-      targets: flash,
-      alpha: 0,
-      duration: 220,
-      onComplete: () => flash.destroy()
-    });
-  }
-
   handleShurikenScreenHit(shuriken) {
-    this.handleScreenWeaponHit(shuriken);
-  }
+    if (this.isGameOver || this.isLevelTransitioning || !shuriken.active) return;
 
-  handleSwordScreenHit(sword) {
-    this.handleScreenWeaponHit(sword);
-  }
+    const hitX = shuriken.x;
+    const hitY = shuriken.y;
 
-  handleScreenWeaponHit(weapon) {
-    if (this.isGameOver || this.isLevelTransitioning || !weapon.active) return;
-
-    const hitX = weapon.x;
-    const hitY = weapon.y;
-
-    this.tweens.killTweensOf(weapon);
-    weapon.setActive(false).setVisible(false);
-    weapon.body.stop();
+    this.tweens.killTweensOf(shuriken);
+    shuriken.setActive(false).setVisible(false);
+    shuriken.body.stop();
 
     this.currentHealth = Math.max(0, this.currentHealth - 1);
     this.drawHearts();
@@ -1631,12 +1376,6 @@ export default class MainScene extends Phaser.Scene {
       }
     });
 
-    this.swords.children.iterate((sword) => {
-      if (sword && sword.active && sword.y > offscreenY) {
-        this.handleSwordScreenHit(sword);
-      }
-    });
-
     this.beers.children.iterate((beer) => {
       if (beer && beer.active && beer.y > offscreenY) {
         beer.setActive(false).setVisible(false);
@@ -1698,13 +1437,6 @@ export default class MainScene extends Phaser.Scene {
 
       shuriken.setActive(false).setVisible(false);
       shuriken.body?.stop();
-    });
-
-    this.swords.children.iterate((sword) => {
-      if (!sword) return;
-
-      sword.setActive(false).setVisible(false);
-      sword.body?.stop();
     });
 
     this.beers.children.iterate((beer) => {
@@ -1824,54 +1556,6 @@ export default class MainScene extends Phaser.Scene {
     graphics.fillStyle(0x11151c, 1);
     graphics.fillCircle(80, 80, 11);
     graphics.generateTexture("shuriken", 160, 160);
-    graphics.destroy();
-  }
-
-  /**
-   * Creates a clean sword projectile texture for level 5 attacks.
-   */
-  createSwordTexture() {
-    if (this.textures.exists("sword")) return;
-
-    const graphics = this.make.graphics({ x: 0, y: 0, add: false });
-    const blade = [
-      new Phaser.Math.Vector2(38, 42),
-      new Phaser.Math.Vector2(176, 42),
-      new Phaser.Math.Vector2(224, 50),
-      new Phaser.Math.Vector2(176, 58),
-      new Phaser.Math.Vector2(38, 58),
-    ];
-
-    graphics.fillStyle(0xcbd5df, 1);
-    graphics.fillPoints(blade, true);
-    graphics.lineStyle(4, 0xf8fbff, 1);
-    graphics.beginPath();
-    graphics.moveTo(46, 45);
-    graphics.lineTo(174, 45);
-    graphics.lineTo(208, 50);
-    graphics.strokePath();
-    graphics.lineStyle(3, 0x55616d, 1);
-    graphics.beginPath();
-    graphics.moveTo(46, 57);
-    graphics.lineTo(176, 57);
-    graphics.strokePath();
-
-    graphics.fillStyle(0x926a26, 1);
-    graphics.fillRect(8, 44, 42, 12);
-    graphics.lineStyle(3, 0x3c2811, 1);
-    graphics.strokeRect(8, 44, 42, 12);
-
-    graphics.fillStyle(0xe4b84f, 1);
-    graphics.fillRect(46, 31, 14, 38);
-    graphics.fillCircle(14, 50, 9);
-    graphics.lineStyle(3, 0x5e3d12, 1);
-    graphics.strokeRect(46, 31, 14, 38);
-    graphics.strokeCircle(14, 50, 9);
-
-    graphics.fillStyle(0xffffff, 0.36);
-    graphics.fillTriangle(76, 42, 146, 42, 98, 47);
-
-    graphics.generateTexture("sword", 238, 100);
     graphics.destroy();
   }
 
