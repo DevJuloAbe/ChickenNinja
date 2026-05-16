@@ -35,6 +35,14 @@ export default class MainScene extends Phaser.Scene {
       5: { name: "HARDCORE", maxScore: null, bombChance: 0.5, speed: 1.38, spawnDelay: 720 },
     };
     this.scoreText = null;
+    this.comboText = null;
+    this.comboStreak = 0;
+    this.comboThreshold = 8;
+    this.isSpreeComboActive = false;
+    this.spreeComboEndsAt = 0;
+    this.spreeComboTimer = null;
+    this.spreeSpawnTimer = null;
+    this.spreeFireworkTimer = null;
     this.collectedDrumsticks = [];
     this.collectionBg = null;
     this.backgroundText = null;
@@ -171,6 +179,7 @@ export default class MainScene extends Phaser.Scene {
     // Initialize health display
     this.drawHearts();
     this.drawScore();
+    this.drawComboStatus();
     this.drawCollectionTray();
     this.drawSkillBar();
 
@@ -432,12 +441,16 @@ export default class MainScene extends Phaser.Scene {
     });
     impactEmitter.explode();
 
+    const isRainChicken = object.getData("rainChicken");
+    const pointValue = this.isSpreeComboActive ? 4 : 2;
+
     // 4. Normal chickens become fried chicken; rain chickens are bonus-only.
-    if (!object.getData("rainChicken")) {
+    if (!isRainChicken) {
       this.addCollectedDrumstick(object.x - 15, object.y);
       this.addCollectedDrumstick(object.x + 15, object.y);
+      this.registerComboSlice(object.x, object.y);
     }
-    this.addPoints(2, object.x, object.y);
+    this.addPoints(pointValue, object.x, object.y);
 
     // 5. Deactivate Original Object (Object Pooling)
     object.setActive(false).setVisible(false);
@@ -673,6 +686,7 @@ export default class MainScene extends Phaser.Scene {
       object.setBlendMode(Phaser.BlendModes.NORMAL);
       object.setData("noLifePenalty", false);
       object.setData("rainChicken", false);
+      object.setData("spreeChicken", false);
       object.setScale(this.getResponsiveScale(0.32, 0.22, 0.42));
       object.setCircle(Math.max(object.displayWidth, object.displayHeight) / 2);
       object.setVelocity(
@@ -777,6 +791,7 @@ export default class MainScene extends Phaser.Scene {
     chicken.setCircle(Math.max(chicken.displayWidth, chicken.displayHeight) / 2);
     chicken.setData("noLifePenalty", true);
     chicken.setData("rainChicken", true);
+    chicken.setData("spreeChicken", false);
     chicken.setVelocity(
       Phaser.Math.Between(-width * 0.18 * speed, width * 0.18 * speed),
       Phaser.Math.Between(height * 0.95 * speed, height * 1.35 * speed)
@@ -1108,6 +1123,245 @@ export default class MainScene extends Phaser.Scene {
       align
       }
     ).setOrigin(origin, 0).setDepth(110);
+  }
+
+  drawComboStatus() {
+    const mobile = this.isMobileLayout();
+    const x = mobile ? 32 : this.scale.width - 32;
+    const y = mobile ? 150 : 96;
+    const origin = mobile ? 0 : 1;
+    const align = mobile ? "left" : "right";
+
+    if (!this.comboText) {
+      this.comboText = this.add.text(x, y, "", {
+        fontFamily: "system-ui, Segoe UI, sans-serif",
+        fontSize: mobile ? "16px" : "20px",
+        fontStyle: "900",
+        color: "#ffd66b",
+        stroke: "#111111",
+        strokeThickness: 5,
+        align,
+      }).setDepth(112);
+    }
+
+    this.comboText
+      .setPosition(x, y)
+      .setOrigin(origin, 0)
+      .setFontSize(mobile ? "16px" : "20px")
+      .setAlign(align);
+
+    this.refreshComboStatus();
+  }
+
+  refreshComboStatus() {
+    if (!this.comboText) return;
+
+    if (this.isSpreeComboActive) {
+      const remaining = Math.max(0, this.spreeComboEndsAt - this.time.now);
+      this.comboText
+        .setVisible(true)
+        .setColor("#ffd66b")
+        .setText(`SPREE COMBO\n${(remaining / 1000).toFixed(1)}s`);
+      return;
+    }
+
+    if (this.comboStreak > 0) {
+      const needed = Math.max(0, this.comboThreshold - this.comboStreak);
+      this.comboText
+        .setVisible(true)
+        .setColor(needed ? "#fff3c4" : "#ffd66b")
+        .setText(needed ? `COMBO ${this.comboStreak}\n${needed} TO SPREE` : "SPREE READY");
+      return;
+    }
+
+    this.comboText.setVisible(false);
+  }
+
+  registerComboSlice(x, y) {
+    if (this.isSpreeComboActive) {
+      this.comboStreak += 1;
+      this.refreshComboStatus();
+      return;
+    }
+
+    this.comboStreak += 1;
+    this.refreshComboStatus();
+
+    if (this.comboStreak >= this.comboThreshold) {
+      this.startSpreeCombo(x, y);
+      return;
+    }
+
+    if (this.comboStreak >= 3) {
+      const text = this.add.text(x, y - 34, `${this.comboStreak} COMBO`, {
+        fontFamily: "system-ui, Segoe UI, sans-serif",
+        fontSize: this.isMobileLayout() ? "18px" : "22px",
+        fontStyle: "900",
+        color: "#fff3c4",
+        stroke: "#181100",
+        strokeThickness: 4,
+      }).setOrigin(0.5).setDepth(166);
+
+      this.tweens.add({
+        targets: text,
+        y: y - 82,
+        alpha: 0,
+        duration: 560,
+        ease: "Quad.Out",
+        onComplete: () => text.destroy(),
+      });
+    }
+  }
+
+  resetComboStreak() {
+    if (this.comboStreak <= 0) return;
+
+    this.comboStreak = 0;
+    this.refreshComboStatus();
+  }
+
+  startSpreeCombo(x = this.scale.width / 2, y = this.scale.height * 0.42) {
+    if (this.isSpreeComboActive || this.isGameOver || this.isLevelTransitioning) return;
+
+    this.isSpreeComboActive = true;
+    this.spreeComboEndsAt = this.time.now + 6000;
+    this.comboStreak = 0;
+    this.refreshComboStatus();
+    this.cameras.main.flash(180, 255, 214, 107, false);
+    this.cameras.main.shake(220, 0.008);
+    this.showPowerUpText("SPREE COMBO!", x, y);
+
+    for (let i = 0; i < 8; i++) {
+      this.time.delayedCall(i * 80, () => this.spawnSpreeChicken());
+    }
+
+    this.spreeSpawnTimer = this.time.addEvent({
+      delay: 145,
+      callback: () => {
+        this.spawnSpreeChicken();
+        if (Math.random() < 0.42) {
+          this.spawnSpreeChicken();
+        }
+      },
+      callbackScope: this,
+      loop: true,
+    });
+
+    this.spreeFireworkTimer = this.time.addEvent({
+      delay: 260,
+      callback: this.launchSpreeFirework,
+      callbackScope: this,
+      loop: true,
+    });
+
+    this.spreeComboTimer = this.time.delayedCall(6000, () => this.endSpreeCombo());
+  }
+
+  endSpreeCombo(announce = true) {
+    if (this.spreeComboTimer) {
+      this.spreeComboTimer.remove(false);
+      this.spreeComboTimer = null;
+    }
+
+    if (this.spreeSpawnTimer) {
+      this.spreeSpawnTimer.remove(false);
+      this.spreeSpawnTimer = null;
+    }
+
+    if (this.spreeFireworkTimer) {
+      this.spreeFireworkTimer.remove(false);
+      this.spreeFireworkTimer = null;
+    }
+
+    if (!this.isSpreeComboActive && this.comboStreak === 0) {
+      this.refreshComboStatus();
+      return;
+    }
+
+    this.isSpreeComboActive = false;
+    this.spreeComboEndsAt = 0;
+    this.comboStreak = 0;
+    this.refreshComboStatus();
+
+    if (announce && !this.isGameOver && !this.isLevelTransitioning) {
+      this.showPowerUpText("SPREE DONE!", this.scale.width / 2, this.scale.height * 0.36);
+    }
+  }
+
+  spawnSpreeChicken() {
+    if (!this.isSpreeComboActive || this.isGameOver || this.isLevelTransitioning) return;
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const key = Phaser.Utils.Array.GetRandom(["manokpula", "talisay"]);
+    const startY = height + Phaser.Math.Between(50, 95);
+    const chicken = this.objects.get(Phaser.Math.Between(width * 0.1, width * 0.9), startY, key);
+
+    if (!chicken) return;
+
+    const arc = this.getRandomLaunchArc(startY, "bonus");
+    chicken.setActive(true).setVisible(true);
+    chicken.clearTint();
+    chicken.setTint(0xfff1a1);
+    chicken.setAlpha(1);
+    chicken.setBlendMode(Phaser.BlendModes.ADD);
+    chicken.setScale(this.getResponsiveScale(0.24, 0.17, 0.32));
+    chicken.setCircle(Math.max(chicken.displayWidth, chicken.displayHeight) / 2);
+    chicken.setData("noLifePenalty", true);
+    chicken.setData("rainChicken", false);
+    chicken.setData("spreeChicken", true);
+    chicken.setVelocity(
+      Phaser.Math.Between(-width * 0.18, width * 0.18),
+      arc.velocityY * Phaser.Math.FloatBetween(0.9, 1.06)
+    );
+    chicken.setGravityY(arc.gravityY * 0.9);
+    chicken.setAngularVelocity(Phaser.Math.Between(-420, 420));
+  }
+
+  launchSpreeFirework() {
+    if (!this.isSpreeComboActive || this.isGameOver) return;
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const x = Phaser.Math.Between(width * 0.12, width * 0.88);
+    const y = Phaser.Math.Between(height * 0.1, height * 0.48);
+    const color = Phaser.Utils.Array.GetRandom([0xffd66b, 0xff6b6b, 0x7ce7ff, 0xa8ff7a, 0xffffff]);
+    const burst = this.add.graphics().setDepth(186);
+
+    burst.lineStyle(3, color, 0.95);
+    for (let i = 0; i < 14; i++) {
+      const angle = (Math.PI * 2 * i) / 14;
+      const inner = Phaser.Math.Between(10, 18);
+      const outer = Phaser.Math.Between(42, 76);
+
+      burst.beginPath();
+      burst.moveTo(x + Math.cos(angle) * inner, y + Math.sin(angle) * inner);
+      burst.lineTo(x + Math.cos(angle) * outer, y + Math.sin(angle) * outer);
+      burst.strokePath();
+    }
+
+    burst.fillStyle(0xffffff, 0.9);
+    burst.fillCircle(x, y, 5);
+    this.add.particles(x, y, "particle", {
+      speed: { min: 70, max: 270 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.1, end: 0 },
+      color: [color, 0xffffff, 0xfff1a1],
+      alpha: { start: 1, end: 0 },
+      lifespan: 620,
+      quantity: 24,
+      emitting: false,
+    }).explode();
+
+    this.tweens.add({
+      targets: burst,
+      alpha: 0,
+      scaleX: 1.2,
+      scaleY: 1.2,
+      duration: 520,
+      ease: "Quad.Out",
+      onComplete: () => burst.destroy(),
+    });
   }
 
   /**
@@ -2070,6 +2324,7 @@ export default class MainScene extends Phaser.Scene {
     if (this.isGameOver || !this.levelConfig[nextLevel]) return;
 
     this.isLevelTransitioning = true;
+    this.endSpreeCombo(false);
     this.swipePoints = [];
     this.graphics.clear();
 
@@ -2361,6 +2616,7 @@ export default class MainScene extends Phaser.Scene {
 
     this.refreshSkillButtons();
     this.updateShadowClones();
+    this.refreshComboStatus();
 
     const offscreenY = this.scale.height + this.bottomPadding;
 
@@ -2371,6 +2627,7 @@ export default class MainScene extends Phaser.Scene {
         object.body.stop();
         
         if (!object.getData("noLifePenalty")) {
+          this.resetComboStreak();
           this.currentHealth = Math.max(0, this.currentHealth - 1);
           this.drawHearts();
           
@@ -2441,6 +2698,7 @@ export default class MainScene extends Phaser.Scene {
     this.swipePoints = [];
     this.graphics.clear();
     this.input.enabled = false;
+    this.endSpreeCombo(false);
     this.clearShadowClones();
 
     if (this.spawnTimer) {
@@ -2568,6 +2826,7 @@ export default class MainScene extends Phaser.Scene {
     this.layoutBackgroundText();
     this.drawCollectionTray();
     this.drawScore();
+    this.drawComboStatus();
     this.drawSkillBar();
   }
 
