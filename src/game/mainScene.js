@@ -95,6 +95,7 @@ export default class MainScene extends Phaser.Scene {
       return skills;
     }, {});
     this.skillButtons = [];
+    this.skillBarPanel = null;
     this.skillKeyHandlers = [];
     this.skillTooltip = null;
     this.skillProjectiles = null;
@@ -102,6 +103,7 @@ export default class MainScene extends Phaser.Scene {
     this.shadowCloneCharges = 0;
     this.shadowCloneSprites = [];
     this.shadowCloneTimer = null;
+    this.shadowCloneScanAt = 0;
   }
 
   preload() {
@@ -234,10 +236,20 @@ export default class MainScene extends Phaser.Scene {
   setupSkillKeys() {
     if (!this.input.keyboard) return;
 
+    const numpadKeyCodes = {
+      1: Phaser.Input.Keyboard.KeyCodes.NUMPAD_ONE,
+      2: Phaser.Input.Keyboard.KeyCodes.NUMPAD_TWO,
+      3: Phaser.Input.Keyboard.KeyCodes.NUMPAD_THREE,
+      4: Phaser.Input.Keyboard.KeyCodes.NUMPAD_FOUR,
+      5: Phaser.Input.Keyboard.KeyCodes.NUMPAD_FIVE,
+    };
+
     this.skillDefinitions.forEach((skill) => {
-      const key = this.input.keyboard.addKey(skill.keyCode);
-      key.on("down", () => this.activateSkill(skill.id));
-      this.skillKeyHandlers.push(key);
+      [skill.keyCode, numpadKeyCodes[skill.keyLabel]].filter(Boolean).forEach((keyCode) => {
+        const key = this.input.keyboard.addKey(keyCode);
+        key.on("down", () => this.activateSkill(skill.id));
+        this.skillKeyHandlers.push(key);
+      });
     });
   }
 
@@ -1103,72 +1115,99 @@ export default class MainScene extends Phaser.Scene {
    */
   drawSkillBar() {
     this.hideSkillTooltip();
+    if (this.skillBarPanel) {
+      this.skillBarPanel.destroy();
+      this.skillBarPanel = null;
+    }
     this.skillButtons.forEach(({ container }) => container.destroy(true));
     this.skillButtons = [];
 
     const width = this.scale.width;
     const height = this.scale.height;
     const mobile = this.isMobileLayout();
-    const gap = mobile ? 6 : 10;
+    const gap = mobile ? 7 : 10;
     const trayHeight = Math.min(100, Math.max(72, height * 0.13));
     const buttonWidth = mobile
-      ? Phaser.Math.Clamp((width - 42 - gap * (this.skillDefinitions.length - 1)) / this.skillDefinitions.length, 54, 74)
-      : 92;
-    const buttonHeight = mobile ? 52 : 58;
+      ? Phaser.Math.Clamp((width - 44 - gap * (this.skillDefinitions.length - 1)) / this.skillDefinitions.length, 58, 82)
+      : 104;
+    const buttonHeight = mobile ? 58 : 68;
     const totalWidth = this.skillDefinitions.length * buttonWidth + (this.skillDefinitions.length - 1) * gap;
     const startX = width / 2 - totalWidth / 2 + buttonWidth / 2;
     const y = Phaser.Math.Clamp(
-      height - trayHeight - (mobile ? 44 : 52),
-      mobile ? 126 : 96,
-      height - trayHeight - 26
+      height - trayHeight - (mobile ? 48 : 58),
+      mobile ? 128 : 104,
+      height - trayHeight - 30
     );
+    const panelPadding = mobile ? 8 : 12;
+    const panelWidth = totalWidth + panelPadding * 2;
+    const panelHeight = buttonHeight + (mobile ? 14 : 18);
+
+    this.skillBarPanel = this.add.graphics().setDepth(148);
+    this.skillBarPanel.fillStyle(0x050909, 0.82);
+    this.skillBarPanel.fillRoundedRect(width / 2 - panelWidth / 2, y - panelHeight / 2, panelWidth, panelHeight, 8);
+    this.skillBarPanel.lineStyle(2, 0xf2c35b, 0.55);
+    this.skillBarPanel.strokeRoundedRect(width / 2 - panelWidth / 2, y - panelHeight / 2, panelWidth, panelHeight, 8);
 
     this.skillDefinitions.forEach((definition, index) => {
       const skill = this.skills[definition.id];
       const x = startX + index * (buttonWidth + gap);
       const container = this.add.container(x, y).setDepth(150);
       const background = this.add.graphics();
-      const keyText = this.add.text(-buttonWidth / 2 + 7, -buttonHeight / 2 + 5, skill.keyLabel, {
+      const icon = this.add.graphics();
+      const keyCap = this.add.graphics();
+      const cooldownOverlay = this.add.graphics();
+      const keyText = this.add.text(-buttonWidth / 2 + 10, -buttonHeight / 2 + 8, skill.keyLabel, {
         fontFamily: "system-ui, Segoe UI, sans-serif",
-        fontSize: mobile ? "10px" : "11px",
+        fontSize: mobile ? "12px" : "13px",
         fontStyle: "900",
         color: "#ffe6a4",
-      }).setOrigin(0, 0);
-      const label = this.add.text(0, mobile ? 2 : 4, skill.label.toUpperCase(), {
+      }).setOrigin(0.5);
+      const label = this.add.text(0, buttonHeight / 2 - (mobile ? 13 : 15), skill.label.toUpperCase(), {
         fontFamily: "system-ui, Segoe UI, sans-serif",
-        fontSize: mobile ? "11px" : "13px",
+        fontSize: mobile ? "10px" : "12px",
         fontStyle: "900",
         color: "#fff8e5",
         align: "center",
       }).setOrigin(0.5);
-      const cooldownText = this.add.text(0, -buttonHeight / 2 + 15, "", {
+      const cooldownText = this.add.text(0, 0, "", {
         fontFamily: "system-ui, Segoe UI, sans-serif",
-        fontSize: mobile ? "18px" : "20px",
+        fontSize: mobile ? "20px" : "24px",
         fontStyle: "900",
         color: "#ffffff",
         stroke: "#0b1012",
         strokeThickness: 4,
       }).setOrigin(0.5);
 
-      container.add([background, keyText, label, cooldownText]);
+      this.drawSkillIcon(icon, skill.id, 0, mobile ? -4 : -5, mobile ? 0.82 : 1);
+      container.add([background, icon, keyCap, keyText, label, cooldownOverlay, cooldownText]);
       container.setSize(buttonWidth, buttonHeight);
       container.setInteractive(
         new Phaser.Geom.Rectangle(-buttonWidth / 2, -buttonHeight / 2, buttonWidth, buttonHeight),
         Phaser.Geom.Rectangle.Contains
       );
+      if (container.input) {
+        container.input.cursor = "pointer";
+      }
       container.on("pointerdown", (pointer, localX, localY, event) => {
         event?.stopPropagation();
         this.activateSkill(skill.id);
       });
+      container.on("pointerup", () => container.setScale(1));
       container.on("pointerover", () => this.showSkillTooltip(skill, x, y - buttonHeight / 2 - 12));
-      container.on("pointerout", () => this.hideSkillTooltip());
+      container.on("pointerout", () => {
+        container.setScale(1);
+        this.hideSkillTooltip();
+      });
 
       this.skillButtons.push({
         skill,
         container,
         background,
+        icon,
+        keyCap,
         keyText,
         label,
+        cooldownOverlay,
         cooldownText,
         width: buttonWidth,
         height: buttonHeight,
@@ -1185,19 +1224,140 @@ export default class MainScene extends Phaser.Scene {
       const remaining = Math.max(0, button.skill.nextReadyAt - this.time.now);
       const ready = remaining <= 0 && !this.isGameOver && !this.isLevelTransitioning;
       const fillColor = ready ? button.skill.color : 0x11181a;
-      const fillAlpha = ready ? 0.88 : 0.78;
+      const fillAlpha = ready ? 0.18 : 0.72;
       const lineColor = ready ? 0xfff1b8 : 0x526066;
 
       button.background.clear();
+      button.background.fillStyle(0x0b1112, 0.96);
+      button.background.fillRoundedRect(-button.width / 2, -button.height / 2, button.width, button.height, 8);
       button.background.fillStyle(fillColor, fillAlpha);
-      button.background.fillRect(-button.width / 2, -button.height / 2, button.width, button.height);
+      button.background.fillRoundedRect(-button.width / 2 + 3, -button.height / 2 + 3, button.width - 6, button.height - 6, 6);
+      button.background.fillStyle(ready ? button.skill.color : 0x2b3437, ready ? 0.95 : 0.45);
+      button.background.fillRoundedRect(-button.width / 2 + 5, -button.height / 2 + 5, button.width - 10, 5, 3);
       button.background.lineStyle(2, lineColor, ready ? 0.95 : 0.55);
-      button.background.strokeRect(-button.width / 2, -button.height / 2, button.width, button.height);
+      button.background.strokeRoundedRect(-button.width / 2, -button.height / 2, button.width, button.height, 8);
 
-      button.label.setColor(ready ? "#111111" : "#d8dddc");
+      button.keyCap.clear();
+      button.keyCap.fillStyle(ready ? 0xffe3a1 : 0x1b2427, ready ? 1 : 0.95);
+      button.keyCap.fillRoundedRect(-button.width / 2 + 5, -button.height / 2 + 5, 24, 22, 5);
+      button.keyCap.lineStyle(1, ready ? 0x211a0d : 0x667278, 0.7);
+      button.keyCap.strokeRoundedRect(-button.width / 2 + 5, -button.height / 2 + 5, 24, 22, 5);
+
+      button.cooldownOverlay.clear();
+      if (remaining > 0) {
+        const progress = Phaser.Math.Clamp(remaining / button.skill.cooldown, 0, 1);
+        button.cooldownOverlay.fillStyle(0x020405, 0.66);
+        button.cooldownOverlay.fillRoundedRect(-button.width / 2 + 3, -button.height / 2 + 3, button.width - 6, button.height - 6, 6);
+        button.cooldownOverlay.fillStyle(0xfff1b8, 0.18);
+        button.cooldownOverlay.fillRect(
+          -button.width / 2 + 3,
+          button.height / 2 - 3 - (button.height - 6) * (1 - progress),
+          button.width - 6,
+          (button.height - 6) * (1 - progress)
+        );
+      }
+
+      button.container.setAlpha(ready ? 1 : 0.86);
+      button.icon.setAlpha(ready ? 1 : 0.45);
+      button.label.setColor(ready ? "#fff8e5" : "#adb9b7");
       button.keyText.setColor(ready ? "#111111" : "#ffe6a4");
       button.cooldownText.setText(remaining > 0 ? String(Math.ceil(remaining / 1000)) : "");
     });
+  }
+
+  drawSkillIcon(graphics, skillId, x, y, scale) {
+    graphics.clear();
+    graphics.lineStyle(3 * scale, 0xfff8d6, 0.95);
+    graphics.fillStyle(0xfff8d6, 0.94);
+
+    if (skillId === "dashSlash") {
+      graphics.lineStyle(5 * scale, 0xfff8d6, 0.96);
+      graphics.beginPath();
+      graphics.moveTo(x - 25 * scale, y + 12 * scale);
+      graphics.lineTo(x + 23 * scale, y - 13 * scale);
+      graphics.strokePath();
+      graphics.fillTriangle(
+        x + 26 * scale, y - 16 * scale,
+        x + 13 * scale, y - 13 * scale,
+        x + 21 * scale, y - 3 * scale
+      );
+      graphics.lineStyle(2 * scale, 0xff7060, 0.9);
+      graphics.beginPath();
+      graphics.moveTo(x - 18 * scale, y + 18 * scale);
+      graphics.lineTo(x + 14 * scale, y + 2 * scale);
+      graphics.strokePath();
+      return;
+    }
+
+    if (skillId === "featherShuriken") {
+      for (let i = 0; i < 5; i++) {
+        const angle = -0.75 + i * 0.36;
+        const tipX = x + Math.cos(angle) * 27 * scale;
+        const tipY = y + Math.sin(angle) * 27 * scale;
+        graphics.lineStyle(2 * scale, 0xb7f7ff, 0.95);
+        graphics.beginPath();
+        graphics.moveTo(x - 4 * scale, y + 10 * scale);
+        graphics.lineTo(tipX, tipY);
+        graphics.strokePath();
+        graphics.fillStyle(0xb7f7ff, 0.88);
+        graphics.fillTriangle(
+          tipX,
+          tipY,
+          tipX - 9 * scale,
+          tipY + 3 * scale,
+          tipX - 3 * scale,
+          tipY + 10 * scale
+        );
+      }
+      return;
+    }
+
+    if (skillId === "eggBomb") {
+      graphics.fillStyle(0xf7f0d4, 1);
+      graphics.fillEllipse(x, y - 4 * scale, 28 * scale, 36 * scale);
+      graphics.lineStyle(3 * scale, 0xffd166, 0.9);
+      graphics.strokeEllipse(x, y - 4 * scale, 28 * scale, 36 * scale);
+      graphics.lineStyle(3 * scale, 0xff8a45, 0.9);
+      graphics.beginPath();
+      graphics.moveTo(x - 22 * scale, y + 17 * scale);
+      graphics.lineTo(x - 12 * scale, y + 8 * scale);
+      graphics.lineTo(x - 4 * scale, y + 21 * scale);
+      graphics.lineTo(x + 7 * scale, y + 7 * scale);
+      graphics.lineTo(x + 20 * scale, y + 17 * scale);
+      graphics.strokePath();
+      return;
+    }
+
+    if (skillId === "jumpKick") {
+      graphics.lineStyle(4 * scale, 0xff9866, 1);
+      graphics.strokeCircle(x - 8 * scale, y - 15 * scale, 8 * scale);
+      graphics.beginPath();
+      graphics.moveTo(x - 8 * scale, y - 6 * scale);
+      graphics.lineTo(x - 2 * scale, y + 10 * scale);
+      graphics.lineTo(x + 22 * scale, y + 1 * scale);
+      graphics.strokePath();
+      graphics.beginPath();
+      graphics.moveTo(x - 2 * scale, y + 10 * scale);
+      graphics.lineTo(x - 17 * scale, y + 22 * scale);
+      graphics.strokePath();
+      graphics.lineStyle(3 * scale, 0xfff8d6, 0.9);
+      graphics.beginPath();
+      graphics.moveTo(x + 16 * scale, y - 9 * scale);
+      graphics.lineTo(x + 28 * scale, y - 16 * scale);
+      graphics.strokePath();
+      return;
+    }
+
+    graphics.fillStyle(0x9fb2ff, 0.76);
+    graphics.fillCircle(x - 15 * scale, y - 3 * scale, 13 * scale);
+    graphics.fillCircle(x + 15 * scale, y - 3 * scale, 13 * scale);
+    graphics.fillStyle(0xfff8d6, 0.95);
+    graphics.fillCircle(x, y - 6 * scale, 16 * scale);
+    graphics.lineStyle(2 * scale, 0x111a30, 0.7);
+    graphics.strokeCircle(x, y - 6 * scale, 16 * scale);
+    graphics.fillStyle(0x111a30, 0.95);
+    graphics.fillCircle(x - 5 * scale, y - 8 * scale, 2 * scale);
+    graphics.fillCircle(x + 5 * scale, y - 8 * scale, 2 * scale);
   }
 
   showSkillTooltip(skill, x, y) {
@@ -1239,6 +1399,635 @@ export default class MainScene extends Phaser.Scene {
 
     this.skillTooltip.destroy(true);
     this.skillTooltip = null;
+  }
+
+  activateSkill(skillId) {
+    const skill = this.skills[skillId];
+    if (!skill || this.isGameOver || this.isLevelTransitioning) return false;
+
+    const remaining = Math.max(0, skill.nextReadyAt - this.time.now);
+    if (remaining > 0) {
+      this.showSkillNotReady(skill, remaining);
+      this.refreshSkillButtons();
+      return false;
+    }
+
+    skill.nextReadyAt = this.time.now + skill.cooldown;
+    this.cameras.main.shake(100, 0.0035);
+
+    switch (skillId) {
+      case "dashSlash":
+        this.castDashSlash();
+        break;
+      case "featherShuriken":
+        this.castFeatherShuriken();
+        break;
+      case "eggBomb":
+        this.castEggBomb();
+        break;
+      case "jumpKick":
+        this.castJumpKick();
+        break;
+      case "shadowClone":
+        this.castShadowClone();
+        break;
+      default:
+        return false;
+    }
+
+    this.refreshSkillButtons();
+    return true;
+  }
+
+  showSkillNotReady(skill, remaining) {
+    if (this.time.now - (skill.lastDeniedAt || 0) < 650) return;
+
+    skill.lastDeniedAt = this.time.now;
+    const target = this.getSkillTargetPoint();
+    this.showPowerUpText(`${Math.ceil(remaining / 1000)}s`, target.x, target.y + 28);
+  }
+
+  getSkillTargetPoint() {
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const trayHeight = Math.min(100, Math.max(72, height * 0.13));
+    const pointer = this.input?.activePointer;
+    const fallback = this.lastPointerPosition || { x: width / 2, y: height * 0.43 };
+    const pointerInWorld = pointer
+      && pointer.x >= 0
+      && pointer.x <= width
+      && pointer.y >= 0
+      && pointer.y <= height;
+    const point = pointerInWorld ? pointer : fallback;
+
+    return {
+      x: Phaser.Math.Clamp(point.x, 48, width - 48),
+      y: Phaser.Math.Clamp(point.y, 84, height - trayHeight - 112),
+    };
+  }
+
+  getSkillLaunchOrigin() {
+    const target = this.getSkillTargetPoint();
+    const height = this.scale.height;
+    const trayHeight = Math.min(100, Math.max(72, height * 0.13));
+
+    return {
+      x: target.x,
+      y: height - trayHeight - 28,
+    };
+  }
+
+  castDashSlash() {
+    const width = this.scale.width;
+    const target = this.getSkillTargetPoint();
+    const line = new Phaser.Geom.Line(-80, target.y + 44, width + 80, target.y - 50);
+    const slash = this.add.graphics().setDepth(182);
+    const runner = this.add.image(-70, line.y1, "bonusChicken")
+      .setDepth(181)
+      .setScale(this.getResponsiveScale(0.28, 0.18, 0.34))
+      .setFlipX(false);
+
+    slash.lineStyle(18, 0xffffff, 0.14);
+    slash.beginPath();
+    slash.moveTo(line.x1, line.y1);
+    slash.lineTo(line.x2, line.y2);
+    slash.strokePath();
+    slash.lineStyle(7, 0xfff1a1, 0.92);
+    slash.beginPath();
+    slash.moveTo(line.x1, line.y1);
+    slash.lineTo(line.x2, line.y2);
+    slash.strokePath();
+    slash.lineStyle(3, 0xff4a3a, 0.82);
+    slash.beginPath();
+    slash.moveTo(line.x1 + 44, line.y1 + 15);
+    slash.lineTo(line.x2 - 44, line.y2 + 15);
+    slash.strokePath();
+
+    this.hitSkillTargetsByLine(line, 78);
+    this.showPowerUpText("DASH SLASH!", width / 2, target.y);
+
+    this.tweens.add({
+      targets: runner,
+      x: width + 70,
+      y: line.y2,
+      angle: 18,
+      duration: 270,
+      ease: "Sine.Out",
+      onComplete: () => runner.destroy(),
+    });
+    this.tweens.add({
+      targets: slash,
+      alpha: 0,
+      duration: 260,
+      ease: "Quad.Out",
+      onComplete: () => slash.destroy(),
+    });
+  }
+
+  castFeatherShuriken() {
+    const origin = this.getSkillLaunchOrigin();
+    const targets = this.getNearestSkillTargets(origin, 5);
+
+    if (!targets.length) {
+      this.throwFeatherFan(origin);
+      this.showPowerUpText("FEATHER STORM!", origin.x, origin.y - 70);
+      return;
+    }
+
+    targets.forEach((target, index) => {
+      const feather = this.skillProjectiles.create(origin.x, origin.y, "feather");
+      const targetX = target.item.x;
+      const targetY = target.item.y;
+      const angle = Phaser.Math.Angle.Between(origin.x, origin.y, targetX, targetY);
+
+      feather.setDepth(176);
+      feather.setScale(this.getResponsiveScale(0.48, 0.34, 0.62));
+      feather.setRotation(angle + Math.PI / 2);
+      feather.body.setAllowGravity(false);
+      feather.body.stop();
+
+      this.tweens.add({
+        targets: feather,
+        x: targetX,
+        y: targetY,
+        angle: feather.angle + 180,
+        duration: 230 + index * 45,
+        ease: "Quad.Out",
+        onComplete: () => {
+          if (target.item?.active) {
+            this.hitSkillTarget(target);
+          }
+          feather.destroy();
+        },
+      });
+    });
+
+    this.showPowerUpText("FEATHER STORM!", origin.x, origin.y - 70);
+  }
+
+  throwFeatherFan(origin) {
+    for (let i = 0; i < 5; i++) {
+      const angle = -Math.PI * 0.86 + i * (Math.PI * 0.22);
+      const distance = Math.min(this.scale.width, this.scale.height) * 0.45;
+      const feather = this.skillProjectiles.create(origin.x, origin.y, "feather");
+
+      feather.setDepth(176);
+      feather.setScale(this.getResponsiveScale(0.48, 0.34, 0.62));
+      feather.setRotation(angle + Math.PI / 2);
+      feather.body.setAllowGravity(false);
+      feather.body.stop();
+
+      this.tweens.add({
+        targets: feather,
+        x: origin.x + Math.cos(angle) * distance,
+        y: origin.y + Math.sin(angle) * distance,
+        alpha: 0,
+        angle: feather.angle + 220,
+        duration: 360,
+        ease: "Quad.Out",
+        onComplete: () => feather.destroy(),
+      });
+    }
+  }
+
+  castEggBomb() {
+    const target = this.getSkillTargetPoint();
+    const egg = this.skillProjectiles.create(target.x - 52, -42, "skillEgg");
+
+    egg.setDepth(178);
+    egg.setScale(this.getResponsiveScale(0.72, 0.48, 0.84));
+    egg.body.setAllowGravity(false);
+    egg.body.stop();
+
+    this.tweens.add({
+      targets: egg,
+      x: target.x,
+      y: target.y,
+      angle: 420,
+      duration: 430,
+      ease: "Quad.In",
+      onComplete: () => {
+        egg.destroy();
+        this.explodeSkillEgg(target.x, target.y);
+      },
+    });
+  }
+
+  explodeSkillEgg(x, y) {
+    const radius = Phaser.Math.Clamp(Math.min(this.scale.width, this.scale.height) * 0.18, 128, 190);
+    const blast = this.add.graphics().setDepth(179);
+
+    blast.fillStyle(0xfff1a1, 0.28);
+    blast.fillCircle(x, y, radius);
+    blast.lineStyle(5, 0xffd166, 0.82);
+    blast.strokeCircle(x, y, radius);
+    blast.lineStyle(2, 0xff7a3d, 0.72);
+    blast.strokeCircle(x, y, radius * 0.68);
+
+    this.add.particles(x, y, "particle", {
+      speed: { min: 120, max: 420 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.14, end: 0 },
+      color: [0xfff1a1, 0xffd166, 0xffffff, 0xff8a45],
+      alpha: { start: 1, end: 0 },
+      lifespan: 720,
+      quantity: 46,
+      emitting: false,
+    }).explode();
+
+    this.hitSkillTargetsInRadius(x, y, radius);
+    this.showPowerUpText("EGG BOMB!", x, y);
+
+    this.tweens.add({
+      targets: blast,
+      alpha: 0,
+      scaleX: 1.12,
+      scaleY: 1.12,
+      duration: 340,
+      ease: "Quad.Out",
+      onComplete: () => blast.destroy(),
+    });
+  }
+
+  castJumpKick() {
+    const height = this.scale.height;
+    const target = this.getSkillTargetPoint();
+    const startX = Phaser.Math.Clamp(target.x - 110, 44, this.scale.width - 44);
+    const endX = Phaser.Math.Clamp(target.x + 82, 44, this.scale.width - 44);
+    const endY = Phaser.Math.Clamp(target.y - 150, 80, height * 0.72);
+    const line = new Phaser.Geom.Line(startX, height + 52, endX, endY);
+    const kick = this.add.image(startX, height + 58, "bonusChicken")
+      .setDepth(181)
+      .setScale(this.getResponsiveScale(0.38, 0.26, 0.48))
+      .setTint(0xffd6b8);
+    const streak = this.add.graphics().setDepth(180);
+
+    streak.lineStyle(12, 0xff9866, 0.22);
+    streak.beginPath();
+    streak.moveTo(line.x1, line.y1);
+    streak.lineTo(line.x2, line.y2);
+    streak.strokePath();
+    streak.lineStyle(5, 0xfff8d6, 0.88);
+    streak.beginPath();
+    streak.moveTo(line.x1 + 10, line.y1 - 18);
+    streak.lineTo(line.x2, line.y2);
+    streak.strokePath();
+
+    this.hitSkillTargetsByLine(line, 92);
+    this.showPowerUpText("JUMP KICK!", target.x, target.y);
+
+    this.tweens.add({
+      targets: kick,
+      x: endX,
+      y: endY,
+      angle: 34,
+      duration: 310,
+      ease: "Back.Out",
+      onComplete: () => kick.destroy(),
+    });
+    this.tweens.add({
+      targets: streak,
+      alpha: 0,
+      duration: 310,
+      ease: "Quad.Out",
+      onComplete: () => streak.destroy(),
+    });
+  }
+
+  castShadowClone() {
+    this.clearShadowClones();
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const trayHeight = Math.min(100, Math.max(72, height * 0.13));
+    const baseY = height - trayHeight - 96;
+    const positions = [width * 0.28, width * 0.5, width * 0.72];
+
+    this.shadowCloneCharges = 14;
+    this.shadowCloneScanAt = 0;
+
+    positions.forEach((x, index) => {
+      const clone = this.add.image(x, baseY, "bonusChicken")
+        .setDepth(136)
+        .setScale(this.getResponsiveScale(0.32, 0.22, 0.42))
+        .setTint(0x9fb2ff)
+        .setAlpha(0.56);
+
+      this.tweens.add({
+        targets: clone,
+        y: baseY - 18,
+        alpha: 0.74,
+        duration: 540 + index * 80,
+        yoyo: true,
+        repeat: -1,
+        ease: "Sine.InOut",
+      });
+
+      this.shadowCloneSprites.push(clone);
+    });
+
+    this.time.delayedCall(120, () => this.shadowCloneOpeningSlashes());
+    this.showPowerUpText("SHADOW CLONE!", width / 2, baseY - 30);
+    this.shadowCloneTimer = this.time.delayedCall(6500, () => this.clearShadowClones());
+  }
+
+  clearShadowClones() {
+    if (this.shadowCloneTimer) {
+      this.shadowCloneTimer.remove(false);
+      this.shadowCloneTimer = null;
+    }
+
+    this.shadowCloneSprites.forEach((clone) => {
+      this.tweens.killTweensOf(clone);
+      clone.destroy();
+    });
+    this.shadowCloneSprites = [];
+    this.shadowCloneCharges = 0;
+  }
+
+  updateShadowClones() {
+    if (!this.shadowCloneCharges || this.time.now < this.shadowCloneScanAt) return;
+
+    this.shadowCloneScanAt = this.time.now + 210;
+    const assistRange = Phaser.Math.Clamp(Math.min(this.scale.width, this.scale.height) * 0.72, 380, 560);
+    this.shadowCloneSprites.some((clone) => this.shadowCloneSlashFrom(clone, assistRange));
+  }
+
+  shadowCloneOpeningSlashes() {
+    if (!this.shadowCloneCharges || !this.shadowCloneSprites.length) return;
+
+    this.shadowCloneSprites.forEach((clone, index) => {
+      this.time.delayedCall(index * 85, () => this.shadowCloneSlashFrom(clone, 9999));
+    });
+  }
+
+  shadowCloneSlashFrom(clone, range) {
+    if (!clone?.active || this.shadowCloneCharges <= 0) return false;
+
+    const target = this.getBestShadowCloneTarget(clone, range);
+    if (!target) return false;
+
+    const line = this.getCloneSlashLine(clone, target.item);
+
+    this.drawShadowCloneSlash(line, target.item.x, target.item.y);
+    this.tweens.add({
+      targets: clone,
+      x: clone.x + Phaser.Math.Clamp(target.item.x - clone.x, -42, 42),
+      y: clone.y - 18,
+      scaleX: clone.scaleX * 1.08,
+      scaleY: clone.scaleY * 1.08,
+      duration: 85,
+      yoyo: true,
+      ease: "Quad.Out",
+    });
+
+    this.hitSkillTarget(target, line);
+    this.shadowCloneCharges -= 1;
+
+    if (this.shadowCloneCharges <= 0) {
+      this.clearShadowClones();
+    }
+
+    return true;
+  }
+
+  getBestShadowCloneTarget(clone, range) {
+    const playableBottom = this.scale.height - Math.min(100, Math.max(72, this.scale.height * 0.13)) - 42;
+    const candidates = this.getActiveSkillTargets({
+      includeBonuses: false,
+      includeBombs: false,
+    })
+      .filter((target) => target.item?.active && target.type === "chicken" && target.item.y < playableBottom)
+      .map((target) => ({
+        ...target,
+        distance: Phaser.Math.Distance.Between(clone.x, clone.y, target.item.x, target.item.y),
+      }))
+      .filter((target) => target.distance <= range)
+      .sort((a, b) => {
+        const heightScore = a.item.y - b.item.y;
+        if (Math.abs(heightScore) > 80) return heightScore;
+        return a.distance - b.distance;
+      });
+
+    return candidates[0] || null;
+  }
+
+  getCloneSlashLine(clone, target) {
+    const angle = Phaser.Math.Angle.Between(clone.x, clone.y, target.x, target.y);
+    const length = Math.max(120, Math.min(240, Phaser.Math.Distance.Between(clone.x, clone.y, target.x, target.y) * 0.42));
+    const slashAngle = angle + Phaser.Math.FloatBetween(-0.5, 0.5);
+    const dx = Math.cos(slashAngle) * length;
+    const dy = Math.sin(slashAngle) * length;
+
+    return new Phaser.Geom.Line(
+      target.x - dx / 2,
+      target.y - dy / 2,
+      target.x + dx / 2,
+      target.y + dy / 2
+    );
+  }
+
+  drawShadowCloneSlash(line, x, y) {
+    const slash = this.add.graphics().setDepth(184);
+    const sparks = this.add.particles(x, y, "particle", {
+      speed: { min: 80, max: 260 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.08, end: 0 },
+      color: [0x9fb2ff, 0xffffff, 0xfff1a1],
+      alpha: { start: 0.95, end: 0 },
+      lifespan: 420,
+      quantity: 14,
+      emitting: false,
+    });
+
+    slash.lineStyle(15, 0x9fb2ff, 0.18);
+    slash.beginPath();
+    slash.moveTo(line.x1, line.y1);
+    slash.lineTo(line.x2, line.y2);
+    slash.strokePath();
+    slash.lineStyle(7, 0xffffff, 0.92);
+    slash.beginPath();
+    slash.moveTo(line.x1, line.y1);
+    slash.lineTo(line.x2, line.y2);
+    slash.strokePath();
+    slash.lineStyle(3, 0x9fb2ff, 0.95);
+    slash.beginPath();
+    slash.moveTo(line.x1 + 16, line.y1 - 12);
+    slash.lineTo(line.x2 - 16, line.y2 + 12);
+    slash.strokePath();
+    slash.lineStyle(4, 0xfff1a1, 0.8);
+    slash.strokeCircle(x, y, 28);
+
+    sparks.explode();
+
+    this.tweens.add({
+      targets: slash,
+      alpha: 0,
+      scaleX: 1.08,
+      scaleY: 1.08,
+      duration: 240,
+      ease: "Quad.Out",
+      onComplete: () => slash.destroy(),
+    });
+  }
+
+  hitNearestSkillTargets(origin, count) {
+    const targets = this.getNearestSkillTargets(origin, count);
+
+    targets.forEach((target, index) => {
+      this.time.delayedCall(index * 70, () => {
+        if (target.item?.active) {
+          this.hitSkillTarget(target);
+        }
+      });
+    });
+
+    return targets.length;
+  }
+
+  getNearestSkillTargets(origin, count) {
+    return this.getActiveSkillTargets()
+      .map((target) => ({
+        ...target,
+        distance: Phaser.Math.Distance.Between(origin.x, origin.y, target.item.x, target.item.y),
+      }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, count);
+  }
+
+  getActiveSkillTargets(options = {}) {
+    const { includeBonuses = true, includeBombs = true } = options;
+    const targets = [];
+    const addGroup = (group, type) => {
+      if (!group) return;
+
+      group.children.iterate((item) => {
+        if (item?.active && item.visible) {
+          targets.push({ item, type });
+        }
+      });
+    };
+
+    addGroup(this.objects, "chicken");
+    addGroup(this.powerUps, "powerUp");
+    addGroup(this.shuriken, "shuriken");
+    if (includeBombs) addGroup(this.bombs, "bomb");
+    if (includeBonuses) {
+      addGroup(this.beers, "beer");
+      addGroup(this.sisigs, "sisig");
+    }
+
+    return targets;
+  }
+
+  hitSkillTargetsByLine(line, thickness = 70) {
+    let hits = 0;
+
+    this.getActiveSkillTargets().forEach((target) => {
+      if (!target.item?.active || !this.lineHitsSprite(line, target.item, thickness)) return;
+
+      this.hitSkillTarget(target, line);
+      hits += 1;
+    });
+
+    return hits;
+  }
+
+  hitSkillTargetsInRadius(x, y, radius) {
+    let hits = 0;
+
+    this.getActiveSkillTargets().forEach((target) => {
+      if (!target.item?.active) return;
+
+      const padding = Math.max(target.item.displayWidth || 0, target.item.displayHeight || 0) * 0.34;
+      if (Phaser.Math.Distance.Between(x, y, target.item.x, target.item.y) > radius + padding) return;
+
+      this.hitSkillTarget(target);
+      hits += 1;
+    });
+
+    return hits;
+  }
+
+  lineHitsSprite(line, sprite, thickness) {
+    const bounds = sprite.getBounds();
+    if (Phaser.Geom.Intersects.LineToRectangle(line, bounds)) return true;
+
+    const padding = Math.max(sprite.displayWidth || 0, sprite.displayHeight || 0) * 0.35;
+    return this.distanceToSegment(sprite.x, sprite.y, line) <= thickness + padding;
+  }
+
+  distanceToSegment(px, py, line) {
+    const dx = line.x2 - line.x1;
+    const dy = line.y2 - line.y1;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (!lengthSquared) {
+      return Phaser.Math.Distance.Between(px, py, line.x1, line.y1);
+    }
+
+    const t = Phaser.Math.Clamp(((px - line.x1) * dx + (py - line.y1) * dy) / lengthSquared, 0, 1);
+    const projectionX = line.x1 + t * dx;
+    const projectionY = line.y1 + t * dy;
+
+    return Phaser.Math.Distance.Between(px, py, projectionX, projectionY);
+  }
+
+  hitSkillTarget(target, line = null) {
+    const item = target.item;
+    if (!item?.active) return false;
+
+    if (target.type === "chicken") {
+      this.sliceChicken(item, line || new Phaser.Geom.Line(item.x - 28, item.y - 16, item.x + 28, item.y + 16));
+      return true;
+    }
+
+    if (target.type === "powerUp") {
+      this.sliceChickenPowerUp(item);
+      return true;
+    }
+
+    if (target.type === "shuriken") {
+      this.sliceShuriken(item);
+      return true;
+    }
+
+    if (target.type === "beer") {
+      this.sliceBeer(item);
+      return true;
+    }
+
+    if (target.type === "sisig") {
+      this.sliceSisig(item);
+      return true;
+    }
+
+    if (target.type === "bomb") {
+      this.defuseBomb(item);
+      return true;
+    }
+
+    return false;
+  }
+
+  defuseBomb(bomb) {
+    if (!bomb?.active) return;
+
+    this.tweens.killTweensOf(bomb);
+    this.add.particles(bomb.x, bomb.y, "particle", {
+      speed: { min: 80, max: 270 },
+      angle: { min: 0, max: 360 },
+      scale: { start: 0.11, end: 0 },
+      color: [0xfff1a1, 0x9fb2ff, 0xffffff],
+      alpha: { start: 0.92, end: 0 },
+      lifespan: 560,
+      quantity: 24,
+      emitting: false,
+    }).explode();
+
+    this.addPoints(3, bomb.x, bomb.y);
+    bomb.setActive(false).setVisible(false);
+    bomb.body?.stop();
   }
 
   addPoints(amount, x, y) {
@@ -1318,7 +2107,7 @@ export default class MainScene extends Phaser.Scene {
   }
 
   stopActiveThrowables() {
-    const groups = [this.objects, this.powerUps, this.shuriken, this.beers, this.sisigs, this.bombs];
+    const groups = [this.objects, this.powerUps, this.shuriken, this.beers, this.sisigs, this.bombs, this.skillProjectiles];
 
     groups.forEach((group) => {
       group.children.iterate((item) => {
@@ -1570,6 +2359,9 @@ export default class MainScene extends Phaser.Scene {
   update() {
     if (this.isGameOver) return;
 
+    this.refreshSkillButtons();
+    this.updateShadowClones();
+
     const offscreenY = this.scale.height + this.bottomPadding;
 
     // Cleanup whole objects that fall off the bottom of the screen (return to pool)
@@ -1627,6 +2419,16 @@ export default class MainScene extends Phaser.Scene {
         bomb.body.stop();
       }
     });
+
+    this.skillProjectiles.children.iterate((projectile) => {
+      if (!projectile || !projectile.active) return;
+
+      const outsideX = projectile.x < -160 || projectile.x > this.scale.width + 160;
+      const outsideY = projectile.y < -220 || projectile.y > offscreenY;
+      if (outsideX || outsideY) {
+        projectile.destroy();
+      }
+    });
   }
 
   /**
@@ -1639,6 +2441,7 @@ export default class MainScene extends Phaser.Scene {
     this.swipePoints = [];
     this.graphics.clear();
     this.input.enabled = false;
+    this.clearShadowClones();
 
     if (this.spawnTimer) {
       this.spawnTimer.remove(false);
@@ -1689,6 +2492,13 @@ export default class MainScene extends Phaser.Scene {
 
       bomb.setActive(false).setVisible(false);
       bomb.body?.stop();
+    });
+
+    this.skillProjectiles.children.iterate((projectile) => {
+      if (!projectile) return;
+
+      this.tweens.killTweensOf(projectile);
+      projectile.destroy();
     });
 
     this.physics.pause();
@@ -1758,6 +2568,7 @@ export default class MainScene extends Phaser.Scene {
     this.layoutBackgroundText();
     this.drawCollectionTray();
     this.drawScore();
+    this.drawSkillBar();
   }
 
   /**
@@ -1914,6 +2725,70 @@ export default class MainScene extends Phaser.Scene {
     graphics.fillCircle(75, 95, 3);
 
     graphics.generateTexture("sisig", 176, 134);
+    graphics.destroy();
+  }
+
+  /**
+   * Creates the feather projectile used by skill 2.
+   */
+  createFeatherTexture() {
+    if (this.textures.exists("feather")) return;
+
+    const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+
+    graphics.fillStyle(0xdffbff, 1);
+    graphics.fillTriangle(42, 8, 70, 98, 26, 92);
+    graphics.fillStyle(0x9ee9ff, 0.82);
+    graphics.fillTriangle(42, 8, 55, 96, 34, 92);
+    graphics.lineStyle(5, 0xffffff, 0.96);
+    graphics.beginPath();
+    graphics.moveTo(42, 10);
+    graphics.lineTo(44, 103);
+    graphics.strokePath();
+    graphics.lineStyle(3, 0x7fcde3, 0.86);
+    for (let i = 0; i < 5; i++) {
+      const y = 34 + i * 11;
+      graphics.beginPath();
+      graphics.moveTo(43, y);
+      graphics.lineTo(60 - i * 2, y + 12);
+      graphics.strokePath();
+      graphics.beginPath();
+      graphics.moveTo(43, y + 2);
+      graphics.lineTo(30 + i, y + 13);
+      graphics.strokePath();
+    }
+
+    graphics.generateTexture("feather", 88, 112);
+    graphics.destroy();
+  }
+
+  /**
+   * Creates the egg projectile used by skill 3.
+   */
+  createEggBombTexture() {
+    if (this.textures.exists("skillEgg")) return;
+
+    const graphics = this.make.graphics({ x: 0, y: 0, add: false });
+
+    graphics.fillStyle(0xf8f1d7, 1);
+    graphics.fillEllipse(54, 62, 62, 84);
+    graphics.fillStyle(0xffffff, 0.48);
+    graphics.fillEllipse(43, 45, 18, 28);
+    graphics.lineStyle(5, 0xe5c365, 1);
+    graphics.strokeEllipse(54, 62, 62, 84);
+    graphics.lineStyle(4, 0xff8a45, 0.9);
+    graphics.beginPath();
+    graphics.moveTo(26, 78);
+    graphics.lineTo(39, 66);
+    graphics.lineTo(51, 84);
+    graphics.lineTo(65, 64);
+    graphics.lineTo(83, 78);
+    graphics.strokePath();
+    graphics.fillStyle(0xffd166, 0.95);
+    graphics.fillCircle(73, 35, 7);
+    graphics.fillCircle(79, 27, 4);
+
+    graphics.generateTexture("skillEgg", 108, 124);
     graphics.destroy();
   }
 

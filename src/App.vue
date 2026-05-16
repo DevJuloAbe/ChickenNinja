@@ -89,6 +89,7 @@ const GAMES_ENDPOINT = "https://docking-635955947416.asia-east1.run.app/api/game
 const VERIFY_PHONE_ENDPOINT = "https://docking-635955947416.asia-east1.run.app/api/auth/game-login";
 const LEADERBOARD_ENDPOINT = "https://docking-635955947416.asia-east1.run.app/api/usermobile/masked/topscorer";
 const GAME_SECRET_KEY = "9ae58c2c2e2a24fb49dba86f27a6ec4a";
+const CURRENT_GAME_SLUG = "chicken-ninja";
 
 const games = ref([]);
 
@@ -140,6 +141,7 @@ async function loadGames() {
   const payload = await response.json();
   games.value = payload?.data?.games || [];
   currentGame.value = games.value.find((game) => game.slug === CURRENT_GAME_SLUG)
+    || games.value.find((game) => game.name?.toLowerCase() === "chicken ninja")
     || games.value.find((game) => game.name?.toLowerCase() === "tek hen")
     || games.value[0]
     || null;
