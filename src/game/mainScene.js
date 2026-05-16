@@ -37,6 +37,71 @@ export default class MainScene extends Phaser.Scene {
     this.scoreText = null;
     this.collectedDrumsticks = [];
     this.collectionBg = null;
+    this.backgroundText = null;
+    this.skillDefinitions = [
+      {
+        id: "dashSlash",
+        name: "Dash Slash",
+        label: "Dash",
+        description: "Chicken dashes forward and cuts enemies",
+        cooldown: 6200,
+        keyCode: Phaser.Input.Keyboard.KeyCodes.ONE,
+        keyLabel: "1",
+        color: 0xffd166,
+      },
+      {
+        id: "featherShuriken",
+        name: "Feather Shuriken",
+        label: "Feather",
+        description: "Throws sharp feathers like ninja stars",
+        cooldown: 5200,
+        keyCode: Phaser.Input.Keyboard.KeyCodes.TWO,
+        keyLabel: "2",
+        color: 0xb7f7ff,
+      },
+      {
+        id: "eggBomb",
+        name: "Egg Bomb",
+        label: "Egg",
+        description: "Drops explosive eggs",
+        cooldown: 7200,
+        keyCode: Phaser.Input.Keyboard.KeyCodes.THREE,
+        keyLabel: "3",
+        color: 0xf7f0d4,
+      },
+      {
+        id: "jumpKick",
+        name: "Chicken Jump Kick",
+        label: "Kick",
+        description: "High jump attack",
+        cooldown: 5800,
+        keyCode: Phaser.Input.Keyboard.KeyCodes.FOUR,
+        keyLabel: "4",
+        color: 0xff9866,
+      },
+      {
+        id: "shadowClone",
+        name: "Shadow Clone",
+        label: "Clone",
+        description: "Creates fake chickens to confuse enemies",
+        cooldown: 10500,
+        keyCode: Phaser.Input.Keyboard.KeyCodes.FIVE,
+        keyLabel: "5",
+        color: 0x9fb2ff,
+      },
+    ];
+    this.skills = this.skillDefinitions.reduce((skills, skill) => {
+      skills[skill.id] = { ...skill, nextReadyAt: 0 };
+      return skills;
+    }, {});
+    this.skillButtons = [];
+    this.skillKeyHandlers = [];
+    this.skillTooltip = null;
+    this.skillProjectiles = null;
+    this.lastPointerPosition = null;
+    this.shadowCloneCharges = 0;
+    this.shadowCloneSprites = [];
+    this.shadowCloneTimer = null;
   }
 
   preload() {
@@ -52,12 +117,15 @@ export default class MainScene extends Phaser.Scene {
   create() {
     // Add full-screen background image
     this.background = this.add.image(0, 0, "chicken").setOrigin(0.5).setDepth(-1);
+    this.createBackgroundText();
 
     this.createParticleTexture();
     this.createShurikenTexture();
     this.createBeerTexture();
     this.createSisigTexture();
     this.createBombTexture();
+    this.createFeatherTexture();
+    this.createEggBombTexture();
 
     // 🚀 PRO FEATURE: Object Pooling for Objects
     this.objects = this.physics.add.group({
@@ -81,6 +149,9 @@ export default class MainScene extends Phaser.Scene {
     // Group to manage bomb hazards
     this.bombs = this.physics.add.group();
 
+    // Group to manage player skill projectiles.
+    this.skillProjectiles = this.physics.add.group();
+
     /** @type {Phaser.Math.Vector2[]} */
     this.swipePoints = [];
 
@@ -99,20 +170,23 @@ export default class MainScene extends Phaser.Scene {
     this.drawHearts();
     this.drawScore();
     this.drawCollectionTray();
+    this.drawSkillBar();
 
     this.resizeWorld();
     this.scale.on("resize", this.resizeWorld, this);
 
     this.setupInputHandlers();
+    this.setupSkillKeys();
   }
 
   /**
    * Configures pointer events for swiping logic.
    */
   setupInputHandlers() {
-    this.input.on("pointerdown", () => {
+    this.input.on("pointerdown", (pointer) => {
       if (this.isGameOver || this.isLevelTransitioning) return;
 
+      this.lastPointerPosition = { x: pointer.x, y: pointer.y };
       this.swipePoints = [];
       this.graphics.clear();
     });
@@ -120,6 +194,7 @@ export default class MainScene extends Phaser.Scene {
     this.input.on("pointermove", (pointer) => {
       if (this.isGameOver || this.isLevelTransitioning || !pointer.isDown) return;
 
+      this.lastPointerPosition = { x: pointer.x, y: pointer.y };
       const point = new Phaser.Math.Vector2(pointer.x, pointer.y);
       this.swipePoints.push(point);
 
@@ -150,6 +225,19 @@ export default class MainScene extends Phaser.Scene {
 
       this.swipePoints = [];
       this.graphics.clear();
+    });
+  }
+
+  /**
+   * Maps number keys to the skill bar.
+   */
+  setupSkillKeys() {
+    if (!this.input.keyboard) return;
+
+    this.skillDefinitions.forEach((skill) => {
+      const key = this.input.keyboard.addKey(skill.keyCode);
+      key.on("down", () => this.activateSkill(skill.id));
+      this.skillKeyHandlers.push(key);
     });
   }
 
@@ -1010,6 +1098,149 @@ export default class MainScene extends Phaser.Scene {
     ).setOrigin(origin, 0).setDepth(110);
   }
 
+  /**
+   * Draws touch-friendly skill buttons inside the game canvas.
+   */
+  drawSkillBar() {
+    this.hideSkillTooltip();
+    this.skillButtons.forEach(({ container }) => container.destroy(true));
+    this.skillButtons = [];
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const mobile = this.isMobileLayout();
+    const gap = mobile ? 6 : 10;
+    const trayHeight = Math.min(100, Math.max(72, height * 0.13));
+    const buttonWidth = mobile
+      ? Phaser.Math.Clamp((width - 42 - gap * (this.skillDefinitions.length - 1)) / this.skillDefinitions.length, 54, 74)
+      : 92;
+    const buttonHeight = mobile ? 52 : 58;
+    const totalWidth = this.skillDefinitions.length * buttonWidth + (this.skillDefinitions.length - 1) * gap;
+    const startX = width / 2 - totalWidth / 2 + buttonWidth / 2;
+    const y = Phaser.Math.Clamp(
+      height - trayHeight - (mobile ? 44 : 52),
+      mobile ? 126 : 96,
+      height - trayHeight - 26
+    );
+
+    this.skillDefinitions.forEach((definition, index) => {
+      const skill = this.skills[definition.id];
+      const x = startX + index * (buttonWidth + gap);
+      const container = this.add.container(x, y).setDepth(150);
+      const background = this.add.graphics();
+      const keyText = this.add.text(-buttonWidth / 2 + 7, -buttonHeight / 2 + 5, skill.keyLabel, {
+        fontFamily: "system-ui, Segoe UI, sans-serif",
+        fontSize: mobile ? "10px" : "11px",
+        fontStyle: "900",
+        color: "#ffe6a4",
+      }).setOrigin(0, 0);
+      const label = this.add.text(0, mobile ? 2 : 4, skill.label.toUpperCase(), {
+        fontFamily: "system-ui, Segoe UI, sans-serif",
+        fontSize: mobile ? "11px" : "13px",
+        fontStyle: "900",
+        color: "#fff8e5",
+        align: "center",
+      }).setOrigin(0.5);
+      const cooldownText = this.add.text(0, -buttonHeight / 2 + 15, "", {
+        fontFamily: "system-ui, Segoe UI, sans-serif",
+        fontSize: mobile ? "18px" : "20px",
+        fontStyle: "900",
+        color: "#ffffff",
+        stroke: "#0b1012",
+        strokeThickness: 4,
+      }).setOrigin(0.5);
+
+      container.add([background, keyText, label, cooldownText]);
+      container.setSize(buttonWidth, buttonHeight);
+      container.setInteractive(
+        new Phaser.Geom.Rectangle(-buttonWidth / 2, -buttonHeight / 2, buttonWidth, buttonHeight),
+        Phaser.Geom.Rectangle.Contains
+      );
+      container.on("pointerdown", (pointer, localX, localY, event) => {
+        event?.stopPropagation();
+        this.activateSkill(skill.id);
+      });
+      container.on("pointerover", () => this.showSkillTooltip(skill, x, y - buttonHeight / 2 - 12));
+      container.on("pointerout", () => this.hideSkillTooltip());
+
+      this.skillButtons.push({
+        skill,
+        container,
+        background,
+        keyText,
+        label,
+        cooldownText,
+        width: buttonWidth,
+        height: buttonHeight,
+      });
+    });
+
+    this.refreshSkillButtons();
+  }
+
+  refreshSkillButtons() {
+    if (!this.skillButtons.length) return;
+
+    this.skillButtons.forEach((button) => {
+      const remaining = Math.max(0, button.skill.nextReadyAt - this.time.now);
+      const ready = remaining <= 0 && !this.isGameOver && !this.isLevelTransitioning;
+      const fillColor = ready ? button.skill.color : 0x11181a;
+      const fillAlpha = ready ? 0.88 : 0.78;
+      const lineColor = ready ? 0xfff1b8 : 0x526066;
+
+      button.background.clear();
+      button.background.fillStyle(fillColor, fillAlpha);
+      button.background.fillRect(-button.width / 2, -button.height / 2, button.width, button.height);
+      button.background.lineStyle(2, lineColor, ready ? 0.95 : 0.55);
+      button.background.strokeRect(-button.width / 2, -button.height / 2, button.width, button.height);
+
+      button.label.setColor(ready ? "#111111" : "#d8dddc");
+      button.keyText.setColor(ready ? "#111111" : "#ffe6a4");
+      button.cooldownText.setText(remaining > 0 ? String(Math.ceil(remaining / 1000)) : "");
+    });
+  }
+
+  showSkillTooltip(skill, x, y) {
+    if (this.isMobileLayout()) return;
+
+    this.hideSkillTooltip();
+
+    const paddingX = 12;
+    const paddingY = 9;
+    const title = this.add.text(0, 0, skill.name, {
+      fontFamily: "system-ui, Segoe UI, sans-serif",
+      fontSize: "14px",
+      fontStyle: "900",
+      color: "#ffd66b",
+    });
+    const body = this.add.text(0, 20, skill.description, {
+      fontFamily: "system-ui, Segoe UI, sans-serif",
+      fontSize: "12px",
+      color: "#fff8e5",
+    });
+    const tooltipWidth = Math.max(title.width, body.width) + paddingX * 2;
+    const tooltipHeight = 48;
+    const tooltipX = Phaser.Math.Clamp(x, tooltipWidth / 2 + 14, this.scale.width - tooltipWidth / 2 - 14);
+    const tooltipY = Phaser.Math.Clamp(y - tooltipHeight / 2, tooltipHeight / 2 + 14, this.scale.height - tooltipHeight / 2 - 14);
+    const background = this.add.graphics();
+
+    background.fillStyle(0x070a0c, 0.92);
+    background.fillRect(-tooltipWidth / 2, -tooltipHeight / 2, tooltipWidth, tooltipHeight);
+    background.lineStyle(1, 0xffd66b, 0.8);
+    background.strokeRect(-tooltipWidth / 2, -tooltipHeight / 2, tooltipWidth, tooltipHeight);
+    title.setPosition(-tooltipWidth / 2 + paddingX, -tooltipHeight / 2 + paddingY);
+    body.setPosition(-tooltipWidth / 2 + paddingX, -tooltipHeight / 2 + paddingY + 20);
+
+    this.skillTooltip = this.add.container(tooltipX, tooltipY, [background, title, body]).setDepth(210);
+  }
+
+  hideSkillTooltip() {
+    if (!this.skillTooltip) return;
+
+    this.skillTooltip.destroy(true);
+    this.skillTooltip = null;
+  }
+
   addPoints(amount, x, y) {
     this.score += amount;
     this.drawScore();
@@ -1485,6 +1716,31 @@ export default class MainScene extends Phaser.Scene {
   /**
    * Keeps the camera, physics world, and background matched to the browser.
    */
+  createBackgroundText() {
+    this.backgroundText = this.add.text(0, 0, "4,300 JM sa sunod na sahod", {
+      fontFamily: "Trebuchet MS, Segoe UI, system-ui, sans-serif",
+      fontSize: "64px",
+      fontStyle: "900",
+      color: "#fff1a8",
+      stroke: "#140d05",
+      strokeThickness: 8,
+      align: "center",
+    }).setOrigin(0.5).setDepth(-0.5).setAlpha(0.48);
+  }
+
+  layoutBackgroundText() {
+    if (!this.backgroundText) return;
+
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const fontSize = Phaser.Math.Clamp(Math.min(width * 0.09, height * 0.11), 28, 76);
+
+    this.backgroundText
+      .setPosition(width / 2, height * 0.42)
+      .setFontSize(`${fontSize}px`)
+      .setWordWrapWidth(width * 0.82);
+  }
+
   resizeWorld() {
     const width = this.scale.width;
     const height = this.scale.height;
@@ -1499,6 +1755,7 @@ export default class MainScene extends Phaser.Scene {
         .setScale(coverScale);
     }
 
+    this.layoutBackgroundText();
     this.drawCollectionTray();
     this.drawScore();
   }
